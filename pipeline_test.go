@@ -27,7 +27,7 @@ func TestResolveIDFromYtDlp(t *testing.T) {
 		gotCmd = cmd
 		return "dQw4w9WgXcQ\n", nil
 	}
-	id, err := ResolveID(run, "https://youtu.be/x")
+	id, err := ResolveID(run, "https://youtu.be/x", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,14 +43,14 @@ func TestResolveIDFallsBackToHash(t *testing.T) {
 	run := func(stage string, cmd []string, stdin string) (string, error) {
 		return "", errors.New("boom")
 	}
-	id1, err := ResolveID(run, "https://example.com/video/1")
+	id1, err := ResolveID(run, "https://example.com/video/1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(id1) != 12 {
 		t.Fatalf("fallback id = %q, want 12 chars", id1)
 	}
-	id2, _ := ResolveID(run, "https://example.com/video/1")
+	id2, _ := ResolveID(run, "https://example.com/video/1", nil)
 	if id1 != id2 {
 		t.Fatal("fallback must be deterministic for the same URL")
 	}
@@ -261,4 +261,39 @@ func createAudio(t *testing.T, dataDir, id string) {
 	p := PathsFor(dataDir, id)
 	os.MkdirAll(filepath.Dir(p.Audio), 0o755)
 	os.WriteFile(p.Audio, []byte("audio"), 0o644)
+}
+
+func TestDownloadUsesConfiguredCommand(t *testing.T) {
+	job, calls := newTestJob(t)
+	job.Cfg.Download.ExtraArgs = []string{"--cookies-from-browser", "chrome"}
+
+	if _, err := job.Download("https://e.com/v1", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := (*calls)[0].cmd
+	want := []string{"--cookies-from-browser", "chrome"}
+	found := false
+	for i := 0; i+2 <= len(cmd); i++ {
+		if cmd[i] == want[0] && cmd[i+1] == want[1] {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("extra args %v not in cmd %v", want, cmd)
+	}
+	if cmd[len(cmd)-1] != "https://e.com/v1" {
+		t.Fatalf("url must stay last, got %v", cmd)
+	}
+}
+
+func TestResolveIDPassesExtraArgs(t *testing.T) {
+	var gotCmd []string
+	run := func(stage string, cmd []string, stdin string) (string, error) {
+		gotCmd = cmd
+		return "abc\n", nil
+	}
+	ResolveID(run, "https://e.com/v", []string{"--cookies-from-browser", "chrome"})
+	if !contains(gotCmd, "--cookies-from-browser") || gotCmd[len(gotCmd)-1] != "https://e.com/v" {
+		t.Fatalf("unexpected command %v", gotCmd)
+	}
 }

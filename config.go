@@ -7,6 +7,12 @@ import (
 	toml "github.com/BurntSushi/toml"
 )
 
+type DownloadConfig struct {
+	// ExtraArgs are appended to the built-in yt-dlp invocation, e.g.
+	// ["--cookies-from-browser", "chrome"] for sites that need fresh cookies.
+	ExtraArgs []string `toml:"extra-args"`
+}
+
 type TranscribeConfig struct {
 	// Command template; {audio} and {rawdir} are expanded before exec.
 	Command []string `toml:"command"`
@@ -20,6 +26,7 @@ type SummarizeConfig struct {
 }
 
 type Config struct {
+	Download   DownloadConfig
 	Transcribe TranscribeConfig
 	Summarize  SummarizeConfig
 }

@@ -27,13 +27,17 @@ func PathsFor(dataDir, id string) Paths {
 }
 
 // ResolveID asks yt-dlp for the canonical video id and falls back to a
+// deterministic hash prefix of the URL when that fails. extraArgs (e.g.
+// cookie flags) are passed through because sites like douyin need them for
+// metadata extraction too.
 // deterministic hash prefix of the URL when that fails.
 // ponytail: the fallback id breaks resume identity across runs when yt-dlp
 // fails intermittently (two parallel artifact trees); acceptable because the
 // fallback only triggers on total yt-dlp failure, where download would fail
 // anyway.
-func ResolveID(run Runner, url string) (string, error) {
-	out, err := run("resolve", []string{"yt-dlp", "--no-download", "--print", "id", url}, "")
+func ResolveID(run Runner, url string, extraArgs []string) (string, error) {
+	cmd := append([]string{"yt-dlp", "--no-download", "--print", "id"}, extraArgs...)
+	out, err := run("resolve", append(cmd, url), "")
 	if err == nil {
 		if id := strings.TrimSpace(out); id != "" && !strings.Contains(id, "\n") {
 			return id, nil
@@ -72,10 +76,9 @@ func (j *Job) Download(url, id string) (skipped bool, err error) {
 	if err := j.ensureDir(p.Audio); err != nil {
 		return false, err
 	}
-	tmpl := ExpandTemplate(
-		[]string{"yt-dlp", "-x", "--audio-format", "mp3", "-o", strings.TrimSuffix(p.Audio, ".mp3") + ".%(ext)s", url},
-		nil,
-	)
+	tmpl := append([]string{"yt-dlp", "-x", "--audio-format", "mp3", "-o", strings.TrimSuffix(p.Audio, ".mp3") + ".%(ext)s"},
+		j.Cfg.Download.ExtraArgs...)
+	tmpl = append(tmpl, url)
 	if _, err := j.Run("download", tmpl, ""); err != nil {
 		return false, err
 	}

@@ -39,25 +39,49 @@ func PathsFor(dataDir, id string) Paths {
 	}
 }
 
-// ResolveID asks yt-dlp for the canonical video id and falls back to a
-// deterministic hash prefix of the URL when that fails. extraArgs (e.g.
+// ResolveID asks yt-dlp for the canonical video id and title; falls back to
+// a deterministic hash id and empty title when that fails. extraArgs (e.g.
 // cookie flags) are passed through because sites like douyin need them for
 // metadata extraction too.
-// deterministic hash prefix of the URL when that fails.
 // ponytail: the fallback id breaks resume identity across runs when yt-dlp
 // fails intermittently (two parallel artifact trees); acceptable because the
 // fallback only triggers on total yt-dlp failure, where download would fail
 // anyway.
-func ResolveID(run Runner, url string, extraArgs []string) (string, error) {
-	cmd := append([]string{"yt-dlp", "--no-download", "--print", "id"}, extraArgs...)
+func ResolveID(run Runner, url string, extraArgs []string) (string, string, error) {
+	cmd := append([]string{"yt-dlp", "--no-download", "--print", "id", "--print", "%(title)s"}, extraArgs...)
 	out, err := run("resolve", append(cmd, url), "")
 	if err == nil {
-		if id := strings.TrimSpace(out); id != "" && !strings.Contains(id, "\n") {
-			return id, nil
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		if len(lines) >= 1 && strings.TrimSpace(lines[0]) != "" {
+			title := ""
+			if len(lines) >= 2 {
+				title = strings.TrimSpace(lines[1])
+			}
+			return strings.TrimSpace(lines[0]), title, nil
 		}
 	}
 	sum := sha256.Sum256([]byte(url))
-	return hex.EncodeToString(sum[:])[:12], nil
+	return hex.EncodeToString(sum[:])[:12], "", nil
+}
+
+var (
+	titleForbidden = regexp.MustCompile(`[/:\\\n\r\t]`)
+	titleSpaces    = regexp.MustCompile(`\s+`)
+)
+
+// BaseName is the artifact file stem: the id, plus a filesystem-safe,
+// length-capped title suffix when one is known.
+func BaseName(id, title string) string {
+	t := titleSpaces.ReplaceAllString(titleForbidden.ReplaceAllString(title, " "), " ")
+	t = strings.Trim(strings.TrimSpace(t), ".")
+	if runes := []rune(t); len(runes) > 80 {
+		t = string(runes[:80])
+	}
+	t = strings.TrimSpace(t)
+	if t == "" {
+		return id
+	}
+	return id + " - " + t
 }
 
 // Job runs pipeline steps for videos against a data directory.
@@ -69,6 +93,23 @@ type Job struct {
 }
 
 func (j *Job) paths(id string) Paths { return PathsFor(j.DataDir, id) }
+
+// FindBase maps a bare video id to the on-disk artifact stem, so titled
+// artifacts ("<id> - <title>") resolve when only the id is given.
+func (j *Job) FindBase(id string) string {
+	p := j.paths(id)
+	if Done(p.Audio) || Done(p.Raw) || Done(p.Out) {
+		return id
+	}
+	for _, dir := range []string{"audio", "raw", "output"} {
+		matches, _ := filepath.Glob(filepath.Join(j.DataDir, dir, id+" *"))
+		if len(matches) > 0 {
+			name := filepath.Base(matches[0])
+			return strings.TrimSuffix(name, filepath.Ext(name))
+		}
+	}
+	return id
+}
 
 func (j *Job) ensureDir(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -105,6 +146,7 @@ func (j *Job) Download(url, id string) (skipped bool, err error) {
 // the raw JSON themselves (e.g. mlx_whisper --output-dir) or print it to
 // stdout, which vidsum then captures.
 func (j *Job) Transcribe(id string) (skipped bool, err error) {
+	id = j.FindBase(id)
 	p := j.paths(id)
 	if !j.Force && Done(p.Raw) {
 		return true, nil
@@ -140,6 +182,7 @@ func (j *Job) Transcribe(id string) (skipped bool, err error) {
 // written to <id>.input.txt for CLIs that prefer {input}) and requires it to
 // produce the output markdown at {out}.
 func (j *Job) Summarize(id string) (skipped bool, err error) {
+	id = j.FindBase(id)
 	p := j.paths(id)
 	if !j.Force && Done(p.Out) {
 		return true, nil

@@ -41,9 +41,9 @@ func main() {
 	case "download":
 		err = step(job, arg)
 	case "transcribe":
-		skipped, err = job.Transcribe(arg)
+		skipped, err = job.Transcribe(job.FindBase(arg))
 	case "summarize":
-		skipped, err = job.Summarize(arg)
+		skipped, err = job.Summarize(job.FindBase(arg))
 	case "run":
 		err = runAll(job, arg)
 	default:
@@ -62,45 +62,46 @@ func main() {
 // step runs the download step; the argument is a URL that needs id resolution.
 func step(job *Job, url string) error {
 	url = ExtractURL(url)
-	id, err := ResolveID(job.Run, url, job.Cfg.Download.ExtraArgs)
+	id, title, err := ResolveID(job.Run, url, job.Cfg.Download.ExtraArgs)
 	if err != nil {
 		return err
 	}
-	skipped, err := job.Download(url, id)
+	skipped, err := job.Download(url, BaseName(id, title))
 	if err != nil {
 		return err
 	}
-	report("download", id, skipped)
+	report("download", BaseName(id, title), skipped)
 	if !skipped {
-		fmt.Printf("  -> %s\n", PathsFor(job.DataDir, id).Audio)
+		fmt.Printf("  -> %s\n", PathsFor(job.DataDir, BaseName(id, title)).Audio)
 	}
 	return nil
 }
 
 func runAll(job *Job, url string) error {
 	url = ExtractURL(url)
-	id, err := ResolveID(job.Run, url, job.Cfg.Download.ExtraArgs)
+	id, title, err := ResolveID(job.Run, url, job.Cfg.Download.ExtraArgs)
 	if err != nil {
 		return err
 	}
+	base := BaseName(id, title)
 
-	skipped, err := job.Download(url, id)
+	skipped, err := job.Download(url, base)
 	if err != nil {
 		return err
 	}
 	report("download", id, skipped)
 
-	skipped, err = job.Transcribe(id)
+	skipped, err = job.Transcribe(base)
 	if err != nil {
 		return err
 	}
-	report("transcribe", id, skipped)
+	report("transcribe", base, skipped)
 
-	skipped, err = job.Summarize(id)
+	skipped, err = job.Summarize(base)
 	if err != nil {
 		return err
 	}
-	report("summarize", id, skipped)
+	report("summarize", base, skipped)
 	return nil
 }
 

@@ -27,12 +27,12 @@ func TestResolveIDFromYtDlp(t *testing.T) {
 		gotCmd = cmd
 		return "dQw4w9WgXcQ\n", nil
 	}
-	id, err := ResolveID(run, "https://youtu.be/x", nil)
+	id, title, err := ResolveID(run, "https://youtu.be/x", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != "dQw4w9WgXcQ" {
-		t.Fatalf("id = %q", id)
+	if id != "dQw4w9WgXcQ" || title != "" {
+		t.Fatalf("id=%q title=%q", id, title)
 	}
 	if !strings.HasPrefix(gotCmd[0], "yt-dlp") || !contains(gotCmd, "--print") {
 		t.Fatalf("unexpected command %v", gotCmd)
@@ -43,14 +43,14 @@ func TestResolveIDFallsBackToHash(t *testing.T) {
 	run := func(stage string, cmd []string, stdin string) (string, error) {
 		return "", errors.New("boom")
 	}
-	id1, err := ResolveID(run, "https://example.com/video/1", nil)
+	id1, _, err := ResolveID(run, "https://example.com/video/1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(id1) != 12 {
 		t.Fatalf("fallback id = %q, want 12 chars", id1)
 	}
-	id2, _ := ResolveID(run, "https://example.com/video/1", nil)
+	id2, _, _ := ResolveID(run, "https://example.com/video/1", nil)
 	if id1 != id2 {
 		t.Fatal("fallback must be deterministic for the same URL")
 	}
@@ -65,9 +65,9 @@ func newTestJob(t *testing.T) (*Job, *[]call) {
 		Run: func(stage string, cmd []string, stdin string) (string, error) {
 			*calls = append(*calls, call{stage, cmd, stdin})
 			if stage == "download" { // simulate yt-dlp producing the audio
-				p := PathsFor(dir, "v1")
-				os.MkdirAll(filepath.Dir(p.Audio), 0o755)
-				os.WriteFile(p.Audio, []byte("audio"), 0o644)
+				audio := strings.TrimSuffix(cmd[cmdIndex(cmd, "-o")+1], ".%(ext)s") + ".mp3"
+				os.MkdirAll(filepath.Dir(audio), 0o755)
+				os.WriteFile(audio, []byte("audio"), 0o644)
 			}
 			return "", nil
 		},
@@ -309,4 +309,84 @@ func TestExtractURLPassesPlainURLThrough(t *testing.T) {
 	if got := ExtractURL("https://youtu.be/x?a=1&b=2"); got != "https://youtu.be/x?a=1&b=2" {
 		t.Fatalf("ExtractURL = %q", got)
 	}
+}
+
+func TestBaseName(t *testing.T) {
+	if got := BaseName("v1", "some/title: here"); got != "v1 - some title here" {
+		t.Fatalf("BaseName sanitize = %q", got)
+	}
+	if got := BaseName("v1", ""); got != "v1" {
+		t.Fatalf("empty title = %q", got)
+	}
+	long := strings.Repeat("字", 100)
+	if got := BaseName("v1", long); len([]rune(got)) != len([]rune("v1"))+1+80+0 && !strings.HasPrefix(got, "v1 - ") {
+		t.Fatalf("long title not capped: %q (%d runes)", got, len([]rune(got)))
+	}
+}
+
+func TestResolveIDReturnsTitle(t *testing.T) {
+	run := func(stage string, cmd []string, stdin string) (string, error) {
+		return "abc123\n我的标题\n", nil
+	}
+	id, title, err := ResolveID(run, "https://e.com/v", nil)
+	if err != nil || id != "abc123" || title != "我的标题" {
+		t.Fatalf("id=%q title=%q err=%v", id, title, err)
+	}
+}
+
+func TestStepsUseTitleInFileNames(t *testing.T) {
+	job, _ := newTestJob(t)
+	base := BaseName("v1", "一个 标题")
+
+	if _, err := job.Download("https://e.com/v1", base); err != nil {
+		t.Fatal(err)
+	}
+	job.Run = func(stage string, cmd []string, stdin string) (string, error) {
+		return `{"text":"ok"}`, nil
+	}
+	if _, err := job.Transcribe(base); err != nil {
+		t.Fatal(err)
+	}
+	p := PathsFor(job.DataDir, base)
+	for _, f := range []string{p.Audio, p.Raw} {
+		if !Done(f) {
+			t.Fatalf("%s missing", f)
+		}
+	}
+	if !strings.Contains(p.Audio, " - 一个 标题") {
+		t.Fatalf("audio name lacks title: %q", p.Audio)
+	}
+}
+
+func TestStandaloneStepResolvesTitledArtifactsByIdPrefix(t *testing.T) {
+	job, calls := newTestJob(t)
+	job.Run = func(stage string, cmd []string, stdin string) (string, error) {
+		*calls = append(*calls, call{stage, cmd, stdin})
+		return `{"text":"x"}`, nil
+	}
+	base := BaseName("v1", "标题")
+	createAudioAt(t, PathsFor(job.DataDir, base).Audio)
+
+	skipped, err := job.Transcribe("v1") // bare id, must find "v1 - 标题.mp3"
+	if err != nil || skipped {
+		t.Fatalf("skipped=%v err=%v", skipped, err)
+	}
+	if !Done(PathsFor(job.DataDir, base).Raw) {
+		t.Fatal("raw must land next to the titled audio")
+	}
+}
+
+func createAudioAt(t *testing.T, path string) {
+	t.Helper()
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	os.WriteFile(path, []byte("audio"), 0o644)
+}
+
+func cmdIndex(cmd []string, flag string) int {
+	for i, c := range cmd {
+		if c == flag {
+			return i
+		}
+	}
+	return -1
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -50,13 +51,14 @@ func (e *RunError) Error() string {
 // Runner executes a command and returns its stdout. Injections point for tests.
 type Runner func(stage string, cmd []string, stdin string) (string, error)
 
-// Exec is the real Runner backed by os/exec.
+// Exec is the real Runner backed by os/exec. Child stderr streams live to
+// the terminal (progress bars/logs) while still being captured for errors.
 func Exec(stage string, cmd []string, stdin string) (string, error) {
 	proc := osProcess(cmd[0], cmd[1:])
 	proc.Stdin = strings.NewReader(stdin)
 	var stdout, stderr strings.Builder
 	proc.Stdout = &stdout
-	proc.Stderr = &stderr
+	proc.Stderr = io.MultiWriter(os.Stderr, &stderr)
 	if err := proc.Run(); err != nil {
 		return stdout.String(), &RunError{Stage: stage, Cmd: cmd, Stdout: stdout.String(), Stderr: stderr.String(), Err: err}
 	}

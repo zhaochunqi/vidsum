@@ -6,8 +6,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+var urlPattern = regexp.MustCompile(`https?://\S+`)
+
+// ExtractURL pulls the first http(s) URL out of a string, so pasted share
+// text (e.g. douyin's "复制此链接..." blob) works directly as input.
+// Plain URLs pass through unchanged; strings without a URL are returned as-is.
+func ExtractURL(s string) string {
+	if m := urlPattern.FindString(s); m != "" {
+		return m
+	}
+	return s
+}
 
 // Paths are the artifact locations for one video id, rooted at DataDir.
 type Paths struct {

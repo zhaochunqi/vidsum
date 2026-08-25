@@ -297,3 +297,16 @@ func TestResolveIDPassesExtraArgs(t *testing.T) {
 		t.Fatalf("unexpected command %v", gotCmd)
 	}
 }
+
+func TestExtractURLFromDouyinShareText(t *testing.T) {
+	share := "0.53 RKj:/ :9pm 04/05 P@x.Sl 92科比一年7倍实盘心法：短线赚钱的根本。# 游资心法 # 情绪周期  https://v.douyin.com/0gC4hgX8SVA/ 复制此链接，打开Dou音搜索，直接观看视频！"
+	if got := ExtractURL(share); got != "https://v.douyin.com/0gC4hgX8SVA/" {
+		t.Fatalf("ExtractURL = %q", got)
+	}
+}
+
+func TestExtractURLPassesPlainURLThrough(t *testing.T) {
+	if got := ExtractURL("https://youtu.be/x?a=1&b=2"); got != "https://youtu.be/x?a=1&b=2" {
+		t.Fatalf("ExtractURL = %q", got)
+	}
+}

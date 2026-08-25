@@ -61,6 +61,7 @@ func main() {
 
 // step runs the download step; the argument is a URL that needs id resolution.
 func step(job *Job, url string) error {
+	url = ExtractURL(url)
 	id, err := ResolveID(job.Run, url, job.Cfg.Download.ExtraArgs)
 	if err != nil {
 		return err
@@ -77,6 +78,7 @@ func step(job *Job, url string) error {
 }
 
 func runAll(job *Job, url string) error {
+	url = ExtractURL(url)
 	id, err := ResolveID(job.Run, url, job.Cfg.Download.ExtraArgs)
 	if err != nil {
 		return err
